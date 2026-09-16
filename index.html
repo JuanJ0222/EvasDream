@@ -119,6 +119,7 @@
   .card .body{position:relative; padding-top:12px; display:flex; flex-direction:column; gap:8px;}
   .card h3{margin:0; font-size:17px; font-weight:600; line-height:1.2;}
   .subtipo{color:var(--ink-soft); font-size:12.5px; margin-top:-6px;}
+  .variante{color:var(--ink-faint); font-size:11.5px; font-family:'JetBrains Mono';}
   .cat-pill{font-size:10.5px; font-weight:700; letter-spacing:.02em; padding:3px 9px; border-radius:999px; text-transform:uppercase;}
   .tagtop{display:flex; justify-content:flex-end;}
   .stockrow{display:flex; align-items:center; justify-content:space-between;}
@@ -255,7 +256,7 @@ let loginError = '', loginBusy = false;
 let theme = 'light';
 
 // inventario state
-let activeCat = 'Todas', searchTerm = '', subtipoFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
+let activeCat = 'Todas', searchTerm = '', subtipoFilter = 'Todos', colorFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
 let editingId = null, confirmingDeleteId = null, pendingFile = null;
 
 // vender state
@@ -279,6 +280,12 @@ function catMeta(catId){ return CATS.find(c=>c.id===catId) || CATS[0]; }
 function subtiposFor(catId){
   const pool = catId && catId !== 'Todas' ? products.filter(p=>p.categoria===catId) : products;
   const s = new Set(); pool.forEach(p=>{ if(p.subtipo) s.add(p.subtipo); });
+  return Array.from(s).sort();
+}
+const TALLA_REQUIRED_CATS = ['Pantuflas','Botas','Pijamas','Peluches'];
+function coloresFor(catId){
+  const pool = catId && catId !== 'Todas' ? products.filter(p=>p.categoria===catId) : products;
+  const s = new Set(); pool.forEach(p=>{ if(p.color) s.add(p.color); });
   return Array.from(s).sort();
 }
 function money(n){ return '$' + Number(n||0).toLocaleString('es-CO', {maximumFractionDigits:0}); }
@@ -371,8 +378,8 @@ async function uploadImage(file){
   return data.publicUrl;
 }
 function exportCSV(){
-  const headers = ['Nombre','Categoria','Subtipo','Variante','Cantidad','Precio venta','Precio compra','Ganancia unidad'];
-  const rows = products.map(p=>[p.nombre, p.categoria, p.subtipo||'', p.variante||'', p.cantidad, p.precio||0, p.precio_compra||0, Number(p.precio||0)-Number(p.precio_compra||0)]);
+  const headers = ['Nombre','Categoria','Subtipo','Talla','Color','Cantidad','Precio venta','Precio compra','Ganancia unidad'];
+  const rows = products.map(p=>[p.nombre, p.categoria, p.subtipo||'', p.talla||'', p.color||'', p.cantidad, p.precio||0, p.precio_compra||0, Number(p.precio||0)-Number(p.precio_compra||0)]);
   const csv = [headers, ...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -458,9 +465,10 @@ function getFilteredInventario(){
   let list = products.filter(p=>{
     if(activeCat !== 'Todas' && p.categoria !== activeCat) return false;
     if(subtipoFilter !== 'Todos' && p.subtipo !== subtipoFilter) return false;
+    if(colorFilter !== 'Todos' && p.color !== colorFilter) return false;
     if(onlyLowStock && Number(p.cantidad||0) > LOW_STOCK_THRESHOLD) return false;
     if(searchTerm){
-      const hay = (p.nombre+' '+(p.subtipo||'')+' '+(p.variante||'')).toLowerCase();
+      const hay = (p.nombre+' '+(p.subtipo||'')+' '+(p.talla||'')+' '+(p.color||'')).toLowerCase();
       if(!hay.includes(searchTerm.toLowerCase())) return false;
     }
     return true;
@@ -656,6 +664,10 @@ function renderInventario(){
         <option value="Todos" ${subtipoFilter==='Todos'?'selected':''}>Todos los subtipos</option>
         ${subtipos.map(s=>`<option value="${esc(s)}" ${subtipoFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
       </select>
+      <select class="toolsel" id="selColor">
+        <option value="Todos" ${colorFilter==='Todos'?'selected':''}>Todos los colores</option>
+        ${coloresFor(activeCat).map(c=>`<option value="${esc(c)}" ${colorFilter===c?'selected':''}>${esc(c)}</option>`).join('')}
+      </select>
       <select class="toolsel" id="selSort">
         <option value="nombre" ${sortBy==='nombre'?'selected':''}>Nombre A-Z</option>
         <option value="stock_asc" ${sortBy==='stock_asc'?'selected':''}>Menor stock primero</option>
@@ -680,6 +692,7 @@ function cardHTML(p){
         <div class="tagtop"><span class="cat-pill" style="background:var(${cat.bg}); color:var(${cat.color});">${esc(p.categoria)}</span></div>
         <h3>${esc(p.nombre)}</h3>
         ${p.subtipo ? `<div class="subtipo">${esc(p.subtipo)}</div>` : ''}
+        ${(p.talla || p.color) ? `<div class="variante">${[p.talla, p.color].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
         <div class="stockrow">
           <div class="stockcount"><span class="num">${Number(p.cantidad||0)}</span> <span class="u">unidades</span></div>
           ${low ? '<span class="lowbadge">Pocas</span>' : ''}
@@ -887,9 +900,11 @@ function renderLogin(){
 /* ---- MODAL: PRODUCTO ---- */
 function renderProductModal(){
   const isNew = editingId === 'new';
-  const p = isNew ? {nombre:'', categoria:CATS[0].id, subtipo:'', variante:'', cantidad:1, precio:'', precio_compra:'', imagen_url:''} : products.find(x=>x.id===editingId);
+  const p = isNew ? {nombre:'', categoria:CATS[0].id, subtipo:'', talla:'', color:'', cantidad:1, precio:'', precio_compra:'', imagen_url:''} : products.find(x=>x.id===editingId);
   if(!p){ editingId = null; return; }
   const sugerencias = subtiposFor(p.categoria);
+  const coloresSugeridos = coloresFor(p.categoria);
+  const tallaNecesaria = TALLA_REQUIRED_CATS.includes(p.categoria);
   pendingFile = null;
   const div = document.createElement('div');
   div.className = 'overlay'; div.id = 'overlay';
@@ -899,18 +914,21 @@ function renderProductModal(){
       <div class="sub">${isNew ? 'Se agregará a tu inventario' : esc(p.categoria)+' · '+esc(p.subtipo||'')}</div>
       <form id="prodForm">
         <div class="imgpreview" id="imgPreview">${p.imagen_url ? `<img src="${esc(p.imagen_url)}">` : 'Sin foto todavía'}</div>
-        <div class="field"><label for="f_foto">Foto (opcional)</label><input id="f_foto" type="file" accept="image/*"></div>
+        <div class="field"><label for="f_foto">Foto (obligatoria)</label><input id="f_foto" type="file" accept="image/*"></div>
         <div class="field"><label for="f_nombre">Nombre</label><input id="f_nombre" required placeholder="Ej: Pantuflas de conejo" value="${esc(p.nombre)}"></div>
         <div class="field-row">
           <div class="field"><label for="f_categoria">Categoría</label><select id="f_categoria">${CATS.map(c=>`<option value="${c.id}" ${c.id===p.categoria?'selected':''}>${c.id}</option>`).join('')}</select></div>
-          <div class="field"><label for="f_subtipo">Subtipo</label><input id="f_subtipo" list="subtipoList" placeholder="Ej: Con horma" value="${esc(p.subtipo||'')}"><datalist id="subtipoList">${sugerencias.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
+          <div class="field"><label for="f_subtipo">Subtipo (diseño)</label><input id="f_subtipo" list="subtipoList" placeholder="Ej: Perro, Liso" value="${esc(p.subtipo||'')}"><datalist id="subtipoList">${sugerencias.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
         </div>
-        <div class="field"><label for="f_variante">Talla / color (opcional)</label><input id="f_variante" placeholder="Ej: Talla M · Rosado" value="${esc(p.variante||'')}"></div>
+        <div class="field-row">
+          <div class="field"><label for="f_talla" id="f_talla_label">Talla${tallaNecesaria ? ' (obligatoria)' : ' (no aplica)'}</label><input id="f_talla" placeholder="Ej: M, 38, Grande" value="${esc(p.talla||'')}" ${tallaNecesaria ? 'required' : 'disabled'}></div>
+          <div class="field"><label for="f_color">Color (opcional)</label><input id="f_color" list="colorList" placeholder="Ej: Negro" value="${esc(p.color||'')}"><datalist id="colorList">${coloresSugeridos.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+        </div>
         <div class="field-row">
           <div class="field"><label for="f_cantidad">Cantidad en stock</label><input id="f_cantidad" type="number" min="0" step="1" required value="${p.cantidad}"></div>
           <div class="field"><label for="f_precio">Precio de venta</label><input id="f_precio" type="number" min="0" step="100" value="${p.precio||''}"></div>
         </div>
-        <div class="field"><label for="f_precio_compra">Precio de compra / costo (opcional)</label><input id="f_precio_compra" type="number" min="0" step="100" value="${p.precio_compra||''}"></div>
+        <div class="field"><label for="f_precio_compra">Precio de compra / costo (obligatorio)</label><input id="f_precio_compra" type="number" min="0" step="100" required value="${p.precio_compra||''}"></div>
         <div class="gananciaPreview" id="gananciaPreview"></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="btnCancel">Cancelar</button>
@@ -935,6 +953,13 @@ function renderProductModal(){
   div.querySelector('#f_categoria').addEventListener('change', (e)=>{
     p.categoria = e.target.value;
     div.querySelector('#subtipoList').innerHTML = subtiposFor(p.categoria).map(s=>`<option value="${esc(s)}">`).join('');
+    div.querySelector('#colorList').innerHTML = coloresFor(p.categoria).map(c=>`<option value="${esc(c)}">`).join('');
+    const necesitaTalla = TALLA_REQUIRED_CATS.includes(p.categoria);
+    const fTalla = div.querySelector('#f_talla');
+    fTalla.required = necesitaTalla;
+    fTalla.disabled = !necesitaTalla;
+    if(!necesitaTalla) fTalla.value = '';
+    document.getElementById('f_talla_label').textContent = necesitaTalla ? 'Talla (obligatoria)' : 'Talla (no aplica)';
   });
   div.querySelector('#f_foto').addEventListener('change', (e)=>{
     const file = e.target.files[0]; if(!file) return;
@@ -949,14 +974,20 @@ function renderProductModal(){
     const nombre = div.querySelector('#f_nombre').value.trim();
     const categoria = div.querySelector('#f_categoria').value;
     const subtipo = div.querySelector('#f_subtipo').value.trim();
-    const variante = div.querySelector('#f_variante').value.trim();
+    const talla = div.querySelector('#f_talla').value.trim();
+    const color = div.querySelector('#f_color').value.trim();
     const cantidad = Math.max(0, parseInt(div.querySelector('#f_cantidad').value || '0', 10));
     const precio = parseFloat(div.querySelector('#f_precio').value || '0');
     const precio_compra = parseFloat(div.querySelector('#f_precio_compra').value || '0');
-    if(!nombre){ btn.disabled = false; return; }
+
+    if(!nombre){ showToast('Falta el nombre'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
+    if(!precio_compra || precio_compra<=0){ showToast('El precio de compra es obligatorio'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
+    if(TALLA_REQUIRED_CATS.includes(categoria) && !talla){ showToast('La talla es obligatoria para esta categoría'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
+    if(!p.imagen_url && !pendingFile){ showToast('La foto es obligatoria'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
+
     let imagen_url = p.imagen_url || null;
     if(pendingFile){ const url = await uploadImage(pendingFile); if(url) imagen_url = url; }
-    const payload = { nombre, categoria, subtipo, variante, cantidad, precio, precio_compra, imagen_url };
+    const payload = { nombre, categoria, subtipo, talla: talla || null, color: color || null, cantidad, precio, precio_compra, imagen_url };
     if(isNew){
       const { error } = await supabase.from('products').insert(payload);
       if(error){ showToast('No se pudo agregar'); btn.disabled = false; return; }
@@ -1120,7 +1151,7 @@ function attachListeners(){
   document.querySelectorAll('.chip[data-cat]').forEach(chip=>{
     chip.addEventListener('click', ()=>{
       if(chip.dataset.group === 'ventaCat') ventaCat = chip.dataset.cat;
-      else { activeCat = chip.dataset.cat; subtipoFilter = 'Todos'; }
+      else { activeCat = chip.dataset.cat; subtipoFilter = 'Todos'; colorFilter = 'Todos'; }
       render();
     });
   });
@@ -1131,6 +1162,7 @@ function attachListeners(){
   const btnExport = document.getElementById('btnExport'); if(btnExport) btnExport.addEventListener('click', exportCSV);
   const search = document.getElementById('search'); if(search) search.addEventListener('input', (e)=>{ searchTerm = e.target.value; render(); });
   const selSubtipo = document.getElementById('selSubtipo'); if(selSubtipo) selSubtipo.addEventListener('change', (e)=>{ subtipoFilter = e.target.value; render(); });
+  const selColor = document.getElementById('selColor'); if(selColor) selColor.addEventListener('change', (e)=>{ colorFilter = e.target.value; render(); });
   const selSort = document.getElementById('selSort'); if(selSort) selSort.addEventListener('change', (e)=>{ sortBy = e.target.value; render(); });
   document.querySelectorAll('[data-step]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
