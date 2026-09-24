@@ -241,11 +241,11 @@ const LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAYAAAA8
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const CATS = [
-  {id:'Pantuflas', color:'--cat-pantuflas', bg:'--cat-pantuflas-bg'},
-  {id:'Botas', color:'--cat-botas', bg:'--cat-botas-bg'},
-  {id:'Pijamas', color:'--cat-pijamas', bg:'--cat-pijamas-bg'},
-  {id:'Peluches', color:'--cat-peluches', bg:'--cat-peluches-bg'},
   {id:'Accesorios', color:'--cat-accesorios', bg:'--cat-accesorios-bg'},
+  {id:'Botas', color:'--cat-botas', bg:'--cat-botas-bg'},
+  {id:'Pantuflas', color:'--cat-pantuflas', bg:'--cat-pantuflas-bg'},
+  {id:'Peluches', color:'--cat-peluches', bg:'--cat-peluches-bg'},
+  {id:'Pijamas', color:'--cat-pijamas', bg:'--cat-pijamas-bg'},
 ];
 
 let session = null, role = null, profile = null, profilesMap = {};
@@ -256,11 +256,11 @@ let loginError = '', loginBusy = false;
 let theme = 'light';
 
 // inventario state
-let activeCat = 'Todas', searchTerm = '', subtipoFilter = 'Todos', colorFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
+let activeCat = 'Todas', searchTerm = '', tallaFilter = 'Todas', colorFilter = 'Todos', subtipoFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
 let editingId = null, confirmingDeleteId = null, pendingFile = null;
 
 // vender state
-let ventaCat = 'Todas', ventaSearch = '', cart = [], metodoPago = 'efectivo';
+let ventaCat = 'Todas', ventaSearch = '', ventaTalla = 'Todas', ventaColor = 'Todos', cart = [], metodoPago = 'efectivo';
 
 // apartados state
 let apModal = null; // {type:'nuevo'|'abono', id}
@@ -286,6 +286,11 @@ const TALLA_REQUIRED_CATS = ['Pantuflas','Botas','Pijamas','Peluches'];
 function coloresFor(catId){
   const pool = catId && catId !== 'Todas' ? products.filter(p=>p.categoria===catId) : products;
   const s = new Set(); pool.forEach(p=>{ if(p.color) s.add(p.color); });
+  return Array.from(s).sort();
+}
+function tallasFor(catId){
+  const pool = catId && catId !== 'Todas' ? products.filter(p=>p.categoria===catId) : products;
+  const s = new Set(); pool.forEach(p=>{ if(p.talla) s.add(p.talla); });
   return Array.from(s).sort();
 }
 function money(n){ return '$' + Number(n||0).toLocaleString('es-CO', {maximumFractionDigits:0}); }
@@ -464,8 +469,9 @@ async function eliminarGasto(id){
 function getFilteredInventario(){
   let list = products.filter(p=>{
     if(activeCat !== 'Todas' && p.categoria !== activeCat) return false;
-    if(subtipoFilter !== 'Todos' && p.subtipo !== subtipoFilter) return false;
+    if(tallaFilter !== 'Todas' && p.talla !== tallaFilter) return false;
     if(colorFilter !== 'Todos' && p.color !== colorFilter) return false;
+    if(subtipoFilter !== 'Todos' && p.subtipo !== subtipoFilter) return false;
     if(onlyLowStock && Number(p.cantidad||0) > LOW_STOCK_THRESHOLD) return false;
     if(searchTerm){
       const hay = (p.nombre+' '+(p.subtipo||'')+' '+(p.talla||'')+' '+(p.color||'')).toLowerCase();
@@ -483,6 +489,8 @@ function getFilteredInventario(){
 function getVentaProducts(){
   return products.filter(p=>{
     if(ventaCat !== 'Todas' && p.categoria !== ventaCat) return false;
+    if(ventaTalla !== 'Todas' && p.talla !== ventaTalla) return false;
+    if(ventaColor !== 'Todos' && p.color !== ventaColor) return false;
     if(ventaSearch){
       const hay = (p.nombre+' '+(p.subtipo||'')).toLowerCase();
       if(!hay.includes(ventaSearch.toLowerCase())) return false;
@@ -571,6 +579,14 @@ function renderVender(){
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input id="ventaSearchInput" type="text" placeholder="Buscar producto…" value="${esc(ventaSearch)}">
           </div>
+          <select class="toolsel" id="selVentaTalla">
+            <option value="Todas" ${ventaTalla==='Todas'?'selected':''}>Todas las tallas</option>
+            ${tallasFor(ventaCat).map(t=>`<option value="${esc(t)}" ${ventaTalla===t?'selected':''}>${esc(t)}</option>`).join('')}
+          </select>
+          <select class="toolsel" id="selVentaColor">
+            <option value="Todos" ${ventaColor==='Todos'?'selected':''}>Todos los colores</option>
+            ${coloresFor(ventaCat).map(c=>`<option value="${esc(c)}" ${ventaColor===c?'selected':''}>${esc(c)}</option>`).join('')}
+          </select>
         </div>
         <div class="chips" style="margin-bottom:14px;">
           ${chipHTML('Todas', products.length, null, 'ventaCat')}
@@ -584,7 +600,8 @@ function renderVender(){
               <div class="pthumb">${p.imagen_url ? `<img src="${esc(p.imagen_url)}">` : '🧸'}</div>
               <div class="pinfo">
                 <div class="pname">${esc(p.nombre)}</div>
-                <div class="pmeta">${esc(p.categoria)}${p.subtipo?' · '+esc(p.subtipo):''} · ${stock} disp.</div>
+                <div class="pmeta">${[p.talla, p.color].filter(Boolean).map(esc).join(' · ') || esc(p.categoria)} · ${stock} disp.</div>
+                ${p.subtipo ? `<div class="pmeta" style="opacity:.75;">${esc(p.subtipo)}</div>` : ''}
               </div>
               <div class="pprice">${money(p.precio)}</div>
               <button class="pos-add" data-add="${p.id}" ${stock<=0?'disabled':''}>＋</button>
@@ -660,13 +677,17 @@ function renderInventario(){
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="search" type="text" placeholder="Buscar producto…" value="${esc(searchTerm)}">
       </div>
-      <select class="toolsel" id="selSubtipo">
-        <option value="Todos" ${subtipoFilter==='Todos'?'selected':''}>Todos los subtipos</option>
-        ${subtipos.map(s=>`<option value="${esc(s)}" ${subtipoFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
+      <select class="toolsel" id="selTalla">
+        <option value="Todas" ${tallaFilter==='Todas'?'selected':''}>Todas las tallas</option>
+        ${tallasFor(activeCat).map(t=>`<option value="${esc(t)}" ${tallaFilter===t?'selected':''}>${esc(t)}</option>`).join('')}
       </select>
       <select class="toolsel" id="selColor">
         <option value="Todos" ${colorFilter==='Todos'?'selected':''}>Todos los colores</option>
         ${coloresFor(activeCat).map(c=>`<option value="${esc(c)}" ${colorFilter===c?'selected':''}>${esc(c)}</option>`).join('')}
+      </select>
+      <select class="toolsel" id="selSubtipo" title="Filtro opcional por diseño/motivo">
+        <option value="Todos" ${subtipoFilter==='Todos'?'selected':''}>Motivo (opcional)</option>
+        ${subtipos.map(s=>`<option value="${esc(s)}" ${subtipoFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
       </select>
       <select class="toolsel" id="selSort">
         <option value="nombre" ${sortBy==='nombre'?'selected':''}>Nombre A-Z</option>
@@ -918,11 +939,11 @@ function renderProductModal(){
         <div class="field"><label for="f_nombre">Nombre</label><input id="f_nombre" required placeholder="Ej: Pantuflas de conejo" value="${esc(p.nombre)}"></div>
         <div class="field-row">
           <div class="field"><label for="f_categoria">Categoría</label><select id="f_categoria">${CATS.map(c=>`<option value="${c.id}" ${c.id===p.categoria?'selected':''}>${c.id}</option>`).join('')}</select></div>
-          <div class="field"><label for="f_subtipo">Subtipo (diseño)</label><input id="f_subtipo" list="subtipoList" placeholder="Ej: Perro, Liso" value="${esc(p.subtipo||'')}"><datalist id="subtipoList">${sugerencias.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
+          <div class="field"><label for="f_subtipo">Motivo (opcional)</label><input id="f_subtipo" list="subtipoList" placeholder="Ej: Perro, Liso" value="${esc(p.subtipo||'')}"><datalist id="subtipoList">${sugerencias.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
         </div>
         <div class="field-row">
           <div class="field"><label for="f_talla" id="f_talla_label">Talla${tallaNecesaria ? ' (obligatoria)' : ' (no aplica)'}</label><input id="f_talla" placeholder="Ej: M, 38, Grande" value="${esc(p.talla||'')}" ${tallaNecesaria ? 'required' : 'disabled'}></div>
-          <div class="field"><label for="f_color">Color (opcional)</label><input id="f_color" list="colorList" placeholder="Ej: Negro" value="${esc(p.color||'')}"><datalist id="colorList">${coloresSugeridos.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+          <div class="field"><label for="f_color">Color (obligatorio)</label><input id="f_color" list="colorList" required placeholder="Ej: Negro" value="${esc(p.color||'')}"><datalist id="colorList">${coloresSugeridos.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
         </div>
         <div class="field-row">
           <div class="field"><label for="f_cantidad">Cantidad en stock</label><input id="f_cantidad" type="number" min="0" step="1" required value="${p.cantidad}"></div>
@@ -983,6 +1004,7 @@ function renderProductModal(){
     if(!nombre){ showToast('Falta el nombre'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
     if(!precio_compra || precio_compra<=0){ showToast('El precio de compra es obligatorio'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
     if(TALLA_REQUIRED_CATS.includes(categoria) && !talla){ showToast('La talla es obligatoria para esta categoría'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
+    if(!color){ showToast('El color es obligatorio'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
     if(!p.imagen_url && !pendingFile){ showToast('La foto es obligatoria'); btn.disabled = false; btn.textContent = isNew?'Agregar':'Guardar'; return; }
 
     let imagen_url = p.imagen_url || null;
@@ -1144,14 +1166,16 @@ function attachListeners(){
   document.querySelectorAll('[data-cartdec]').forEach(btn=>btn.addEventListener('click', ()=>changeCartQty(btn.dataset.cartdec, -1)));
   document.querySelectorAll('[data-cartdel]').forEach(btn=>btn.addEventListener('click', ()=>removeFromCart(btn.dataset.cartdel)));
   const ventaSearchInput = document.getElementById('ventaSearchInput'); if(ventaSearchInput) ventaSearchInput.addEventListener('input', (e)=>{ ventaSearch = e.target.value; render(); });
+  const selVentaTalla = document.getElementById('selVentaTalla'); if(selVentaTalla) selVentaTalla.addEventListener('change', (e)=>{ ventaTalla = e.target.value; render(); });
+  const selVentaColor = document.getElementById('selVentaColor'); if(selVentaColor) selVentaColor.addEventListener('change', (e)=>{ ventaColor = e.target.value; render(); });
   const selMetodo = document.getElementById('selMetodo'); if(selMetodo) selMetodo.addEventListener('change', (e)=>{ metodoPago = e.target.value; });
   const btnConfirmarVenta = document.getElementById('btnConfirmarVenta'); if(btnConfirmarVenta) btnConfirmarVenta.addEventListener('click', confirmSale);
 
   // chips (shared: inventario + vender)
   document.querySelectorAll('.chip[data-cat]').forEach(chip=>{
     chip.addEventListener('click', ()=>{
-      if(chip.dataset.group === 'ventaCat') ventaCat = chip.dataset.cat;
-      else { activeCat = chip.dataset.cat; subtipoFilter = 'Todos'; colorFilter = 'Todos'; }
+      if(chip.dataset.group === 'ventaCat') { ventaCat = chip.dataset.cat; ventaTalla = 'Todas'; ventaColor = 'Todos'; }
+      else { activeCat = chip.dataset.cat; subtipoFilter = 'Todos'; colorFilter = 'Todos'; tallaFilter = 'Todas'; }
       render();
     });
   });
@@ -1161,6 +1185,7 @@ function attachListeners(){
   const btnNuevo = document.getElementById('btnNuevo'); if(btnNuevo) btnNuevo.addEventListener('click', ()=>{ editingId = 'new'; renderProductModal(); });
   const btnExport = document.getElementById('btnExport'); if(btnExport) btnExport.addEventListener('click', exportCSV);
   const search = document.getElementById('search'); if(search) search.addEventListener('input', (e)=>{ searchTerm = e.target.value; render(); });
+  const selTalla = document.getElementById('selTalla'); if(selTalla) selTalla.addEventListener('change', (e)=>{ tallaFilter = e.target.value; render(); });
   const selSubtipo = document.getElementById('selSubtipo'); if(selSubtipo) selSubtipo.addEventListener('change', (e)=>{ subtipoFilter = e.target.value; render(); });
   const selColor = document.getElementById('selColor'); if(selColor) selColor.addEventListener('change', (e)=>{ colorFilter = e.target.value; render(); });
   const selSort = document.getElementById('selSort'); if(selSort) selSort.addEventListener('change', (e)=>{ sortBy = e.target.value; render(); });
