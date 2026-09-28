@@ -293,7 +293,7 @@ let loginError = '', loginBusy = false;
 let theme = 'light';
 
 // inventario state
-let locFilter = 'Todas', moveId = null, selVariant = {}, prefill = null, ventasShown = 8;
+let locFilter = 'Todas', moveId = null, selVariant = {}, prefill = null, ventasShown = 8, ventaVendedorFilter = 'Todos';
 let activeCat = 'Todas', searchTerm = '', tallaFilter = 'Todas', colorFilter = 'Todos', subtipoFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
 let editingId = null, confirmingDeleteId = null, pendingFile = null;
 
@@ -637,6 +637,7 @@ function renderVender(){
   const totalHoy = hoy.reduce((s,v)=>s+Number(v.total||0),0);
   const unidadesHoy = hoy.reduce((s,v)=>s+(v.venta_items||[]).reduce((s2,i)=>s2+Number(i.cantidad||0),0),0);
   const listaProductos = getVentaProducts();
+  const vf = isOwner() ? ventas.filter(v=>ventaVendedorFilter==='Todos' || v.vendedor_id===ventaVendedorFilter) : ventas;
 
   return `
     <section class="stats">
@@ -707,15 +708,20 @@ function renderVender(){
           <select id="selMetodo">
             <option value="efectivo" ${metodoPago==='efectivo'?'selected':''}>Efectivo</option>
             <option value="transferencia" ${metodoPago==='transferencia'?'selected':''}>Transferencia</option>
-            <option value="otro" ${metodoPago==='otro'?'selected':''}>Otro</option>
+            <option value="datafono" ${metodoPago==='datafono'?'selected':''}>Datáfono</option>
+            <option value="credito" ${metodoPago==='credito'?'selected':''}>Crédito</option>
           </select>
         </div>
         <button class="btn btn-primary btn-block" id="btnConfirmarVenta" ${cart.length===0?'disabled':''}>Confirmar venta</button>
       </div>
     </div>
 
-    <h3 style="margin:26px 0 10px;">Ventas recientes</h3>
-    ${ventas.length===0 ? '<div class="empty"><p>Aún no hay ventas registradas.</p></div>' : ventas.slice(0, ventasShown).map(v=>`
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:26px 0 10px; flex-wrap:wrap;"><h3 style="margin:0;">Ventas recientes</h3>${isOwner() && Object.keys(profilesMap).length > 1 ? `
+        <select class="toolsel" id="selVendedorVenta">
+          <option value="Todos" ${ventaVendedorFilter==='Todos'?'selected':''}>Todos los vendedores</option>
+          ${Object.values(profilesMap).map(pf=>`<option value="${pf.id}" ${ventaVendedorFilter===pf.id?'selected':''}>${esc(pf.nombre||'Sin nombre')}</option>`).join('')}
+        </select>` : ''}</div>
+    ${vf.length===0 ? '<div class="empty"><p>Aún no hay ventas registradas.</p></div>' : vf.slice(0, ventasShown).map(v=>`
       <div class="venta-row">
         <div class="vinfo">
           ${new Date(v.created_at).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'})} · ${(v.venta_items||[]).length} producto(s)${isOwner() && profilesMap[v.vendedor_id] ? ' · '+esc(profilesMap[v.vendedor_id].nombre||'') : ''}
@@ -726,7 +732,7 @@ function renderVender(){
         ${isOwner() ? `<button class="btn btn-ghost btn-sm" data-edit-venta="${v.id}">Editar</button>` : ''}
       </div>
     `).join('')}
-    ${ventas.length > ventasShown ? '<div style="text-align:center; margin-top:10px;"><button class="btn btn-ghost btn-sm" id="btnMasVentas">Ver más ventas</button></div>' : ''}
+    ${vf.length > ventasShown ? '<div style="text-align:center; margin-top:10px;"><button class="btn btn-ghost btn-sm" id="btnMasVentas">Ver más ventas</button></div>' : ''}
   `;
 }
 
@@ -955,6 +961,14 @@ function renderGanancias(){
     productMap[pk].ganancia += (Number(i.precio_unitario||0)-Number(i.costo_unitario||0))*Number(i.cantidad||0);
   }));
   const topVendidos = Object.values(productMap).sort((a,b)=>b.ganancia-a.ganancia).slice(0,5);
+  const vendedorMap = {};
+  ventasP.forEach(v=>{
+    const vk = v.vendedor_id || 'sin';
+    if(!vendedorMap[vk]) vendedorMap[vk] = { nombre:(profilesMap[v.vendedor_id]&&profilesMap[v.vendedor_id].nombre)||'Sin asignar', ventas:0, total:0 };
+    vendedorMap[vk].ventas += 1;
+    vendedorMap[vk].total += Number(v.total||0);
+  });
+  const porVendedor = Object.values(vendedorMap).sort((a,b)=>b.total-a.total);
 
   return `
     <div class="period-tabs">${periodos.map(p=>`<button class="period-tab ${gananciasPeriodo===p.id?'active':''}" data-periodo="${p.id}">${p.label}</button>`).join('')}</div>
@@ -972,6 +986,15 @@ function renderGanancias(){
         ${topVendidos.length ? topVendidos.map(p=>`<li><div><div class="tname">${esc(p.nombre)}</div><div class="tcat">${p.cantidad} unidades vendidas</div></div><div class="tval">${money(p.ganancia)}</div></li>`).join('') : '<li>Aún no hay ventas en este período.</li>'}
       </ul>
     </div>
+
+    ${isOwner() && porVendedor.length > 1 ? `
+    <div class="panel" style="margin-bottom:16px;">
+      <h3>Ventas por vendedor</h3>
+      <div class="panelsub">En el período seleccionado</div>
+      <ul class="toplist">
+        ${porVendedor.map(v=>`<li><div><div class="tname">${esc(v.nombre)}</div><div class="tcat">${v.ventas} venta(s)</div></div><div class="tval">${money(v.total)}</div></li>`).join('')}
+      </ul>
+    </div>` : ''}
 
     <div class="panel" style="margin-bottom:16px;">
       <h3>Ganancia potencial del inventario actual</h3>
@@ -1299,9 +1322,9 @@ function renderGalleryModal(id){
 function renderVentaModal(id){
   const v = ventas.find(x=>String(x.id)===String(id)); if(!v) return;
   const items = (v.venta_items||[]).map(i=>({ producto_id:i.producto_id, nombre:i.nombre_producto||'Producto', cantidad:Number(i.cantidad||0), precio:Number(i.precio_unitario||0) }));
-  const metodos = ['efectivo','transferencia','otro'];
+  const metodos = ['efectivo','transferencia','datafono','credito'];
   if(v.metodo_pago && !metodos.includes(v.metodo_pago)) metodos.push(v.metodo_pago);
-  const etiqueta = m => ({efectivo:'Efectivo', transferencia:'Transferencia', otro:'Otro'}[m] || m);
+  const etiqueta = m => ({efectivo:'Efectivo', transferencia:'Transferencia', datafono:'Datáfono', credito:'Crédito', apartado:'Apartado', otro:'Otro'}[m] || m);
   const div = document.createElement('div');
   div.className = 'overlay'; div.id = 'overlay';
   div.innerHTML = `
@@ -1553,6 +1576,7 @@ function attachListeners(){
     editingId = 'new'; renderProductModal();
   }));
   document.querySelectorAll('[data-gallery]').forEach(el=>el.addEventListener('click', ()=>renderGalleryModal(el.dataset.gallery)));
+  const selVendedorVenta = document.getElementById('selVendedorVenta'); if(selVendedorVenta) selVendedorVenta.addEventListener('change', (e)=>{ ventaVendedorFilter = e.target.value; ventasShown = 8; render(); });
   document.querySelectorAll('[data-edit-venta]').forEach(btn=>btn.addEventListener('click', ()=>renderVentaModal(btn.dataset.editVenta)));
   const btnMasVentas = document.getElementById('btnMasVentas'); if(btnMasVentas) btnMasVentas.addEventListener('click', ()=>{ ventasShown += 20; render(); });
   document.querySelectorAll('[data-move]').forEach(btn=>btn.addEventListener('click', ()=>{ renderMoveModal(btn.dataset.move); }));
