@@ -126,6 +126,10 @@
   .stockcount .num{font-family:'JetBrains Mono'; font-size:21px; font-weight:600;}
   .stockcount .u{font-size:11px; color:var(--ink-soft);}
   .lowbadge{font-size:10px; font-weight:700; color:#fff; background:var(--warn); padding:3px 7px; border-radius:999px; text-transform:uppercase;}
+  .locrow{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .loclbl{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); width:62px;}
+  .locnum{font-family:'JetBrains Mono'; font-size:19px; font-weight:600; flex:1;}
+  .locnum.zero{color:var(--ink-faint);}
   .stepper{display:flex; align-items:center; gap:6px;}
   .stepper button{width:26px; height:26px; border-radius:8px; border:1.5px solid var(--line-strong); background:var(--bg-alt); font-size:15px; cursor:pointer; font-weight:700; color:var(--ink);}
   .stepper button:disabled{opacity:.5;}
@@ -256,6 +260,7 @@ let loginError = '', loginBusy = false;
 let theme = 'light';
 
 // inventario state
+let locFilter = 'Todas', moveId = null;
 let activeCat = 'Todas', searchTerm = '', tallaFilter = 'Todas', colorFilter = 'Todos', subtipoFilter = 'Todos', onlyLowStock = false, sortBy = 'nombre';
 let editingId = null, confirmingDeleteId = null, pendingFile = null;
 
@@ -295,6 +300,10 @@ function tallasFor(catId){
 }
 function money(n){ return '$' + Number(n||0).toLocaleString('es-CO', {maximumFractionDigits:0}); }
 function isOwner(){ return role === 'owner'; }
+// cantidad = stock en negocio (lo que descuenta registrar_venta); cantidad_bodega = stock en bodega
+function stockNeg(p){ return Number(p.cantidad||0); }
+function stockBod(p){ return Number(p.cantidad_bodega||0); }
+function stockTotal(p){ return stockNeg(p) + stockBod(p); }
 function showToast(msg){
   const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
   document.body.appendChild(el); setTimeout(()=>el.remove(), 2200);
@@ -383,8 +392,8 @@ async function uploadImage(file){
   return data.publicUrl;
 }
 function exportCSV(){
-  const headers = ['Nombre','Categoria','Subtipo','Talla','Color','Cantidad','Precio venta','Precio compra','Ganancia unidad'];
-  const rows = products.map(p=>[p.nombre, p.categoria, p.subtipo||'', p.talla||'', p.color||'', p.cantidad, p.precio||0, p.precio_compra||0, Number(p.precio||0)-Number(p.precio_compra||0)]);
+  const headers = ['Nombre','Categoria','Subtipo','Talla','Color','Stock negocio','Stock bodega','Stock total','Precio venta','Precio compra','Ganancia unidad'];
+  const rows = products.map(p=>[p.nombre, p.categoria, p.subtipo||'', p.talla||'', p.color||'', stockNeg(p), stockBod(p), stockTotal(p), p.precio||0, p.precio_compra||0, Number(p.precio||0)-Number(p.precio_compra||0)]);
   const csv = [headers, ...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -472,7 +481,9 @@ function getFilteredInventario(){
     if(tallaFilter !== 'Todas' && p.talla !== tallaFilter) return false;
     if(colorFilter !== 'Todos' && p.color !== colorFilter) return false;
     if(subtipoFilter !== 'Todos' && p.subtipo !== subtipoFilter) return false;
-    if(onlyLowStock && Number(p.cantidad||0) > LOW_STOCK_THRESHOLD) return false;
+    if(onlyLowStock && stockTotal(p) > LOW_STOCK_THRESHOLD) return false;
+    if(locFilter === 'negocio' && stockNeg(p) <= 0) return false;
+    if(locFilter === 'bodega' && stockBod(p) <= 0) return false;
     if(searchTerm){
       const hay = (p.nombre+' '+(p.subtipo||'')+' '+(p.talla||'')+' '+(p.color||'')).toLowerCase();
       if(!hay.includes(searchTerm.toLowerCase())) return false;
@@ -481,8 +492,8 @@ function getFilteredInventario(){
   });
   const ganancia = p => Number(p.precio||0) - Number(p.precio_compra||0);
   if(sortBy === 'nombre') list.sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  else if(sortBy === 'stock_asc') list.sort((a,b)=>Number(a.cantidad||0)-Number(b.cantidad||0));
-  else if(sortBy === 'stock_desc') list.sort((a,b)=>Number(b.cantidad||0)-Number(a.cantidad||0));
+  else if(sortBy === 'stock_asc') list.sort((a,b)=>stockTotal(a)-stockTotal(b));
+  else if(sortBy === 'stock_desc') list.sort((a,b)=>stockTotal(b)-stockTotal(a));
   else if(sortBy === 'ganancia_desc') list.sort((a,b)=>ganancia(b)-ganancia(a));
   return list;
 }
@@ -595,12 +606,13 @@ function renderVender(){
         <div class="pos-list">
           ${listaProductos.length ? listaProductos.map(p=>{
             const stock = Number(p.cantidad||0);
+            const enBodega = stockBod(p);
             return `
             <div class="pos-row">
               <div class="pthumb">${p.imagen_url ? `<img src="${esc(p.imagen_url)}">` : '🧸'}</div>
               <div class="pinfo">
                 <div class="pname">${esc(p.nombre)}</div>
-                <div class="pmeta">${[p.talla, p.color].filter(Boolean).map(esc).join(' · ') || esc(p.categoria)} · ${stock} disp.</div>
+                <div class="pmeta">${[p.talla, p.color].filter(Boolean).map(esc).join(' · ') || esc(p.categoria)} · ${stock} disp.${enBodega>0 ? ` · ${enBodega} en bodega` : ''}</div>
                 ${p.subtipo ? `<div class="pmeta" style="opacity:.75;">${esc(p.subtipo)}</div>` : ''}
               </div>
               <div class="pprice">${money(p.precio)}</div>
@@ -652,9 +664,9 @@ function renderVender(){
 function renderInventario(){
   const filtered = getFilteredInventario();
   const totalProductos = products.length;
-  const totalUnidades = products.reduce((s,p)=>s+Number(p.cantidad||0),0);
-  const bajoStock = products.filter(p=>Number(p.cantidad||0) <= LOW_STOCK_THRESHOLD).length;
-  const valorVenta = products.reduce((s,p)=> s + (Number(p.precio||0) * Number(p.cantidad||0)), 0);
+  const totalUnidades = products.reduce((s,p)=>s+stockTotal(p),0);
+  const bajoStock = products.filter(p=>stockTotal(p) <= LOW_STOCK_THRESHOLD).length;
+  const valorVenta = products.reduce((s,p)=> s + (Number(p.precio||0) * stockTotal(p)), 0);
   const subtipos = subtiposFor(activeCat);
 
   return `
@@ -689,6 +701,11 @@ function renderInventario(){
         <option value="Todos" ${subtipoFilter==='Todos'?'selected':''}>Motivo (opcional)</option>
         ${subtipos.map(s=>`<option value="${esc(s)}" ${subtipoFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
       </select>
+      <select class="toolsel" id="selUbic" title="Filtrar por ubicación">
+        <option value="Todas" ${locFilter==='Todas'?'selected':''}>Todas las ubicaciones</option>
+        <option value="negocio" ${locFilter==='negocio'?'selected':''}>Solo negocio</option>
+        <option value="bodega" ${locFilter==='bodega'?'selected':''}>Solo bodega</option>
+      </select>
       <select class="toolsel" id="selSort">
         <option value="nombre" ${sortBy==='nombre'?'selected':''}>Nombre A-Z</option>
         <option value="stock_asc" ${sortBy==='stock_asc'?'selected':''}>Menor stock primero</option>
@@ -703,7 +720,8 @@ function renderInventario(){
 
 function cardHTML(p){
   const cat = catMeta(p.categoria);
-  const low = Number(p.cantidad||0) <= LOW_STOCK_THRESHOLD;
+  const low = stockTotal(p) <= LOW_STOCK_THRESHOLD;
+  const neg = stockNeg(p), bod = stockBod(p);
   const confirming = confirmingDeleteId === p.id;
   const ganancia = Number(p.precio||0) - Number(p.precio_compra||0);
   return `
@@ -714,14 +732,26 @@ function cardHTML(p){
         <h3>${esc(p.nombre)}</h3>
         ${p.subtipo ? `<div class="subtipo">${esc(p.subtipo)}</div>` : ''}
         ${(p.talla || p.color) ? `<div class="variante">${[p.talla, p.color].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
-        <div class="stockrow">
-          <div class="stockcount"><span class="num">${Number(p.cantidad||0)}</span> <span class="u">unidades</span></div>
-          ${low ? '<span class="lowbadge">Pocas</span>' : ''}
+        <div class="locrow">
+          <span class="loclbl">Negocio</span>
+          <span class="locnum ${neg<=0?'zero':''}">${neg}</span>
+          <div class="stepper">
+            <button data-step="-1" data-loc="cantidad" data-id="${p.id}" ${neg<=0?'disabled':''}>−</button>
+            <button data-step="1" data-loc="cantidad" data-id="${p.id}">＋</button>
+          </div>
+        </div>
+        <div class="locrow">
+          <span class="loclbl">Bodega</span>
+          <span class="locnum ${bod<=0?'zero':''}">${bod}</span>
+          <div class="stepper">
+            <button data-step="-1" data-loc="cantidad_bodega" data-id="${p.id}" ${bod<=0?'disabled':''}>−</button>
+            <button data-step="1" data-loc="cantidad_bodega" data-id="${p.id}">＋</button>
+          </div>
         </div>
         <div class="stockrow">
-          <div class="stepper">
-            <button data-step="-1" data-id="${p.id}" ${Number(p.cantidad||0)<=0?'disabled':''}>−</button>
-            <button data-step="1" data-id="${p.id}">＋</button>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn btn-ghost btn-sm" data-move="${p.id}" ${(neg+bod)<=0?'disabled':''}>Mover</button>
+            ${low ? '<span class="lowbadge">Pocas</span>' : ''}
           </div>
           <div>
             ${Number(p.precio||0) > 0 ? `<div class="price">c/u <b>${money(p.precio)}</b></div>` : ''}
@@ -824,8 +854,8 @@ function renderGanancias(){
   const totalGastos = gastosP.reduce((s,g)=>s+Number(g.monto||0),0);
   const gananciaNeta = gananciaReal - totalGastos;
 
-  const inversionInv = products.reduce((s,p)=>s+Number(p.precio_compra||0)*Number(p.cantidad||0),0);
-  const valorVentaInv = products.reduce((s,p)=>s+Number(p.precio||0)*Number(p.cantidad||0),0);
+  const inversionInv = products.reduce((s,p)=>s+Number(p.precio_compra||0)*stockTotal(p),0);
+  const valorVentaInv = products.reduce((s,p)=>s+Number(p.precio||0)*stockTotal(p),0);
   const gananciaPotencial = valorVentaInv - inversionInv;
 
   const ventasCount = ventasP.length;
@@ -887,8 +917,8 @@ function renderCharts(){
   const styles = getComputedStyle(document.documentElement);
   const colorFor = c => styles.getPropertyValue(catMeta(c).color).trim();
   const inkColor = styles.getPropertyValue('--ink').trim();
-  const unidadesPorCat = CATS.map(c=>products.filter(p=>p.categoria===c.id).reduce((s,p)=>s+Number(p.cantidad||0),0));
-  const gananciaPorCat = CATS.map(c=>products.filter(p=>p.categoria===c.id).reduce((s,p)=>s+(Number(p.precio||0)-Number(p.precio_compra||0))*Number(p.cantidad||0),0));
+  const unidadesPorCat = CATS.map(c=>products.filter(p=>p.categoria===c.id).reduce((s,p)=>s+stockTotal(p),0));
+  const gananciaPorCat = CATS.map(c=>products.filter(p=>p.categoria===c.id).reduce((s,p)=>s+(Number(p.precio||0)-Number(p.precio_compra||0))*stockTotal(p),0));
   if(chartDonut) chartDonut.destroy();
   if(chartBar) chartBar.destroy();
   chartDonut = new Chart(canvasDonut, { type:'doughnut', data:{ labels:CATS.map(c=>c.id), datasets:[{ data:unidadesPorCat, backgroundColor:CATS.map(c=>colorFor(c.id)), borderWidth:0 }] }, options:{ plugins:{ legend:{ position:'bottom', labels:{ color:inkColor, font:{family:'Poppins', size:11} } } } } });
@@ -921,7 +951,7 @@ function renderLogin(){
 /* ---- MODAL: PRODUCTO ---- */
 function renderProductModal(){
   const isNew = editingId === 'new';
-  const p = isNew ? {nombre:'', categoria:CATS[0].id, subtipo:'', talla:'', color:'', cantidad:1, precio:'', precio_compra:'', imagen_url:''} : products.find(x=>x.id===editingId);
+  const p = isNew ? {nombre:'', categoria:CATS[0].id, subtipo:'', talla:'', color:'', cantidad:1, cantidad_bodega:0, precio:'', precio_compra:'', imagen_url:''} : products.find(x=>x.id===editingId);
   if(!p){ editingId = null; return; }
   const sugerencias = subtiposFor(p.categoria);
   const coloresSugeridos = coloresFor(p.categoria);
@@ -946,10 +976,13 @@ function renderProductModal(){
           <div class="field"><label for="f_color">Color (obligatorio)</label><input id="f_color" list="colorList" required placeholder="Ej: Negro" value="${esc(p.color||'')}"><datalist id="colorList">${coloresSugeridos.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
         </div>
         <div class="field-row">
-          <div class="field"><label for="f_cantidad">Cantidad en stock</label><input id="f_cantidad" type="number" min="0" step="1" required value="${p.cantidad}"></div>
-          <div class="field"><label for="f_precio">Precio de venta</label><input id="f_precio" type="number" min="0" step="100" value="${p.precio||''}"></div>
+          <div class="field"><label for="f_cantidad">Stock en negocio</label><input id="f_cantidad" type="number" min="0" step="1" required value="${Number(p.cantidad||0)}"></div>
+          <div class="field"><label for="f_bodega">Stock en bodega</label><input id="f_bodega" type="number" min="0" step="1" required value="${Number(p.cantidad_bodega||0)}"></div>
         </div>
-        <div class="field"><label for="f_precio_compra">Precio de compra / costo (obligatorio)</label><input id="f_precio_compra" type="number" min="0" step="100" required value="${p.precio_compra||''}"></div>
+        <div class="field-row">
+          <div class="field"><label for="f_precio">Precio de venta</label><input id="f_precio" type="number" min="0" step="100" value="${p.precio||''}"></div>
+          <div class="field"><label for="f_precio_compra">Precio de compra (obligatorio)</label><input id="f_precio_compra" type="number" min="0" step="100" required value="${p.precio_compra||''}"></div>
+        </div>
         <div class="gananciaPreview" id="gananciaPreview"></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="btnCancel">Cancelar</button>
@@ -998,6 +1031,7 @@ function renderProductModal(){
     const talla = div.querySelector('#f_talla').value.trim();
     const color = div.querySelector('#f_color').value.trim();
     const cantidad = Math.max(0, parseInt(div.querySelector('#f_cantidad').value || '0', 10));
+    const cantidad_bodega = Math.max(0, parseInt(div.querySelector('#f_bodega').value || '0', 10));
     const precio = parseFloat(div.querySelector('#f_precio').value || '0');
     const precio_compra = parseFloat(div.querySelector('#f_precio_compra').value || '0');
 
@@ -1009,7 +1043,7 @@ function renderProductModal(){
 
     let imagen_url = p.imagen_url || null;
     if(pendingFile){ const url = await uploadImage(pendingFile); if(url) imagen_url = url; }
-    const payload = { nombre, categoria, subtipo, talla: talla || null, color: color || null, cantidad, precio, precio_compra, imagen_url };
+    const payload = { nombre, categoria, subtipo, talla: talla || null, color: color || null, cantidad, cantidad_bodega, precio, precio_compra, imagen_url };
     if(isNew){
       const { error } = await supabase.from('products').insert(payload);
       if(error){ showToast('No se pudo agregar'); btn.disabled = false; return; }
@@ -1022,6 +1056,62 @@ function renderProductModal(){
     editingId = null; div.remove(); await loadProducts(); render();
   });
   div.querySelector('#f_nombre').focus();
+}
+
+/* ---- MODAL: MOVER STOCK ENTRE BODEGA Y NEGOCIO ---- */
+function renderMoveModal(id){
+  const p = products.find(x=>x.id===id); if(!p) return;
+  const div = document.createElement('div');
+  div.className = 'overlay'; div.id = 'overlay';
+  div.innerHTML = `
+    <div class="modal">
+      <h2>Mover stock</h2>
+      <div class="sub">${esc(p.nombre)} · Negocio ${stockNeg(p)} · Bodega ${stockBod(p)}</div>
+      <form id="moveForm">
+        <div class="field"><label for="mv_dir">Mover de</label>
+          <select id="mv_dir">
+            <option value="b2n">Bodega a negocio</option>
+            <option value="n2b">Negocio a bodega</option>
+          </select>
+        </div>
+        <div class="field"><label for="mv_cant" id="mv_cant_label">Cantidad</label><input id="mv_cant" type="number" min="1" step="1" required value="1"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="mvCancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="mvOk">Mover</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(div);
+  const dir = div.querySelector('#mv_dir'), cant = div.querySelector('#mv_cant');
+  function disponible(){ return dir.value === 'b2n' ? stockBod(p) : stockNeg(p); }
+  function syncMax(){
+    const max = disponible();
+    cant.max = max;
+    div.querySelector('#mv_cant_label').textContent = `Cantidad (disponible: ${max})`;
+    if(Number(cant.value) > max) cant.value = max > 0 ? max : 1;
+  }
+  syncMax();
+  dir.addEventListener('change', syncMax);
+  div.addEventListener('click', (e)=>{ if(e.target.id === 'overlay') div.remove(); });
+  div.querySelector('#mvCancel').addEventListener('click', ()=>div.remove());
+  div.querySelector('#moveForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const n = parseInt(cant.value || '0', 10);
+    const max = disponible();
+    if(!n || n < 1){ showToast('Indica una cantidad'); return; }
+    if(n > max){ showToast('No hay tanto stock en ese lugar'); return; }
+    const btn = div.querySelector('#mvOk'); btn.disabled = true;
+    const neg = stockNeg(p), bod = stockBod(p);
+    const nuevo = dir.value === 'b2n' ? { cantidad: neg + n, cantidad_bodega: bod - n } : { cantidad: neg - n, cantidad_bodega: bod + n };
+    // solo aplica si el stock no cambió mientras tanto (ej: una venta en curso)
+    const { data, error } = await supabase.from('products').update(nuevo).eq('id', p.id).eq('cantidad', p.cantidad).eq('cantidad_bodega', bod).select('id');
+    if(error){ showToast('No se pudo mover el stock'); btn.disabled = false; return; }
+    if(!data || !data.length){ showToast('El stock cambió, intenta de nuevo'); div.remove(); await loadProducts(); render(); return; }
+    showToast('Stock movido');
+    div.remove(); await loadProducts(); render();
+  });
+  cant.focus();
 }
 
 /* ---- MODAL: APARTADO / ABONO ---- */
@@ -1188,17 +1278,22 @@ function attachListeners(){
   const selTalla = document.getElementById('selTalla'); if(selTalla) selTalla.addEventListener('change', (e)=>{ tallaFilter = e.target.value; render(); });
   const selSubtipo = document.getElementById('selSubtipo'); if(selSubtipo) selSubtipo.addEventListener('change', (e)=>{ subtipoFilter = e.target.value; render(); });
   const selColor = document.getElementById('selColor'); if(selColor) selColor.addEventListener('change', (e)=>{ colorFilter = e.target.value; render(); });
+  const selUbic = document.getElementById('selUbic'); if(selUbic) selUbic.addEventListener('change', (e)=>{ locFilter = e.target.value; render(); });
   const selSort = document.getElementById('selSort'); if(selSort) selSort.addEventListener('change', (e)=>{ sortBy = e.target.value; render(); });
   document.querySelectorAll('[data-step]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const id = btn.dataset.id, delta = parseInt(btn.dataset.step, 10);
+      const campo = btn.dataset.loc === 'cantidad_bodega' ? 'cantidad_bodega' : 'cantidad';
       const p = products.find(x=>x.id===id); if(!p) return;
-      const nuevaCantidad = Math.max(0, Number(p.cantidad||0) + delta);
-      const { error } = await supabase.from('products').update({ cantidad: nuevaCantidad }).eq('id', id);
+      const actual = Number(p[campo]||0);
+      const nuevaCantidad = Math.max(0, actual + delta);
+      const { data, error } = await supabase.from('products').update({ [campo]: nuevaCantidad }).eq('id', id).eq(campo, actual).select('id');
       if(error){ showToast('No se pudo actualizar el stock'); return; }
+      if(!data || !data.length){ showToast('El stock cambió, intenta de nuevo'); }
       await loadProducts(); render();
     });
   });
+  document.querySelectorAll('[data-move]').forEach(btn=>btn.addEventListener('click', ()=>{ renderMoveModal(btn.dataset.move); }));
   document.querySelectorAll('[data-edit]').forEach(btn=>btn.addEventListener('click', ()=>{ editingId = btn.dataset.edit; renderProductModal(); }));
   document.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click', ()=>{ confirmingDeleteId = btn.dataset.del; render(); }));
   document.querySelectorAll('[data-cancel-del]').forEach(btn=>btn.addEventListener('click', ()=>{ confirmingDeleteId = null; render(); }));
